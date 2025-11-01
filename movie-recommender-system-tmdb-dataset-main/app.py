@@ -1,0 +1,129 @@
+# import pickle
+# import streamlit as st
+# import requests
+
+# def fetch_poster(movie_id):
+#     url = "https://api.themoviedb.org/3/movie/{}?api_key=8265bd1679663a7ea12ac168da84d2e8&language=en-US".format(movie_id)
+#     data = requests.get(url)
+#     data = data.json()
+#     poster_path = data['poster_path']
+#     full_path = "https://image.tmdb.org/t/p/w500/" + poster_path
+#     return full_path
+
+# def recommend(movie):
+#     index = movies[movies['title'] == movie].index[0]
+#     distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
+#     recommended_movie_names = []
+#     recommended_movie_posters = []
+#     for i in distances[1:6]:
+#         # fetch the movie poster
+#         movie_id = movies.iloc[i[0]].movie_id
+#         recommended_movie_posters.append(fetch_poster(movie_id))
+#         recommended_movie_names.append(movies.iloc[i[0]].title)
+
+#     return recommended_movie_names,recommended_movie_posters
+
+
+# st.header('Movie Recommender System')
+# movies = pickle.load(open('model/movie_list.pkl','rb'))
+# similarity = pickle.load(open('model/similarity.pkl','rb'))
+
+# movie_list = movies['title'].values
+# selected_movie = st.selectbox(
+#     "Type or select a movie from the dropdown",
+#     movie_list
+# )
+
+# if st.button('Show Recommendation'):
+#     recommended_movie_names,recommended_movie_posters = recommend(selected_movie)
+#     col1, col2, col3, col4, col5 = st.beta_columns(5)
+#     with col1:
+#         st.text(recommended_movie_names[0])
+#         st.image(recommended_movie_posters[0])
+#     with col2:
+#         st.text(recommended_movie_names[1])
+#         st.image(recommended_movie_posters[1])
+
+#     with col3:
+#         st.text(recommended_movie_names[2])
+#         st.image(recommended_movie_posters[2])
+#     with col4:
+#         st.text(recommended_movie_names[3])
+#         st.image(recommended_movie_posters[3])
+#     with col5:
+#         st.text(recommended_movie_names[4])
+#         st.image(recommended_movie_posters[4])
+
+from flask import Flask, request, jsonify, render_template
+import pickle
+import requests
+import pandas as pd
+
+app = Flask(__name__)
+
+# Load data and similarity model
+movies = pickle.load(open('model/movie_list.pkl', 'rb'))
+similarity = pickle.load(open('model/similarity.pkl', 'rb'))
+
+TMDB_API_KEY = "8265bd1679663a7ea12ac168da84d2e8"
+
+
+def fetch_movie_details(movie_id):
+    """Fetch movie poster and genre(s) from TMDB API."""
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}&language=en-US"
+    data = requests.get(url).json()
+
+    # Poster
+    poster_path = data.get('poster_path')
+    poster_url = f"https://image.tmdb.org/t/p/w500/{poster_path}" if poster_path else "https://via.placeholder.com/220x320?text=No+Image"
+
+    # Genre
+    genres = [g['name'] for g in data.get('genres', [])]
+    genre_text = " | ".join(genres) if genres else "Unknown"
+
+    return poster_url, genre_text
+
+
+def recommend(movie):
+    """Recommend movies based on similarity + include genre info."""
+    try:
+        index = movies[movies['title'] == movie].index[0]
+    except IndexError:
+        return []
+
+    distances = list(enumerate(similarity[index]))
+    distances = sorted(distances, reverse=True, key=lambda x: x[1])
+
+    recommended = []
+    for i, score in distances[1:8]:  # Skip the first (same movie)
+        movie_id = movies.iloc[i].movie_id
+        title = movies.iloc[i].title
+
+        # Fetch real-time poster + genres
+        poster, genre = fetch_movie_details(movie_id)
+
+        recommended.append({
+            "title": title,
+            "poster_url": poster,
+            "similarity": round(float(score), 4),
+            "genre": genre
+        })
+    return recommended
+
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+
+@app.route('/recommend', methods=['GET'])
+def recommend_route():
+    title = request.args.get('title')
+    if not title:
+        return jsonify({"error": "Missing title parameter"}), 400
+    results = recommend(title)
+    return jsonify({"results": results})
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
