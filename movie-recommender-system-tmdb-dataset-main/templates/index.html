@@ -301,7 +301,18 @@
 
     try {
       const res = await fetch(`/recommend?title=${encodeURIComponent(query)}`);
-      const data = await res.json();
+
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        const errorText = await res.text();
+        console.error("Non-JSON response received:", errorText);
+        grid.innerHTML = `<p style="color:red;">Server Error: Non-JSON response received.<br>Check Flask console.</p>`;
+        loader.style.display = "none";
+        return;
+      }
+
       loader.style.display = "none";
 
       if (!data.results || data.results.length === 0) {
@@ -328,6 +339,7 @@
     }
   }
 </script>
+
 
 </body>
 </html>
